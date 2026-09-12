@@ -182,10 +182,14 @@
 (() => {
   // ---------- config & state ----------
   const params = new URLSearchParams(location.search);
-  const DEMO = params.get('demo') === '1' || /github\.io$/.test(location.hostname) || location.protocol === 'file:';
+  const FORCE_DEMO = params.get('demo') === '1' || location.protocol === 'file:';
   const TOKEN = params.get('token') || localStorage.getItem('apiToken') || '';
   if (params.get('token')) { try { localStorage.setItem('apiToken', params.get('token')); } catch {} }
   const API = (params.get('api') || '').replace(/\/$/, '');   // optional: point at a remote backend
+  // Static-data mode (GitHub Pages): readings.json is published to the repo's `data` branch by GitHub Actions.
+  const DATA_URL = params.get('data') || (/github\.io$/.test(location.hostname)
+    ? 'https://raw.githubusercontent.com/linuxexpert1/dexcom-dashboard/data/readings.json'
+    : 'data/readings.json');
   const state = {
     hours: 24, unit: localStorage.getItem('unit') || 'mgdl', readings: [], current: null, health: null,
     thresholds: { target_low: 70, target_high: 180, urgent_low: 55, urgent_high: 250 },
@@ -232,24 +236,45 @@
     return r.json();
   }
   let demoCache = null;
+  function loadDemo() {
+    demoCache = demoCache || demoReadings(24 * 7);
+    const cutoff = Date.now() / 1000 - state.hours * 3600;
+    state.readings = demoCache.filter(r => r.ts >= cutoff);
+    const last = demoCache[demoCache.length - 1], prevR = demoCache[demoCache.length - 2];
+    state.current = { reading: last, previous: prevR, delta: last.mg_dl - prevR.mg_dl, age_seconds: Math.floor(Date.now() / 1000 - last.ts) };
+    state.health = { demo_mode: true, stale: false, last_error: null };
+  }
   async function load() {
     try {
-      if (DEMO) {
-        demoCache = demoCache || demoReadings(24 * 7);
-        const cutoff = Date.now() / 1000 - state.hours * 3600;
-        state.readings = demoCache.filter(r => r.ts >= cutoff);
-        const last = demoCache[demoCache.length - 1], prevR = demoCache[demoCache.length - 2];
-        state.current = { reading: last, previous: prevR, delta: last.mg_dl - prevR.mg_dl, age_seconds: Math.floor(Date.now() / 1000 - last.ts) };
-        state.health = { demo_mode: true, stale: false, last_error: null };
-      } else {
+      if (API) {
         const [cur, rd, health] = await Promise.all([api('/api/current'), api(`/api/readings?hours=${state.hours}`), api('/api/health')]);
         state.current = cur; state.readings = rd.readings; state.health = health;
         if (rd.thresholds) state.thresholds = rd.thresholds;
+      } else if (FORCE_DEMO) {
+        loadDemo();
+      } else {
+        const res = await fetch(`${DATA_URL}${DATA_URL.includes('?') ? '&' : '?'}_=${Date.now()}`, { cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const j = await res.json();
+        const rows = (j.readings || []).map(r => ({ ...r, status: classify(r.mg_dl) }));
+        if (!rows.length) throw new Error('no readings yet');
+        if (j.thresholds) state.thresholds = j.thresholds;
+        const cutoff = Date.now() / 1000 - state.hours * 3600;
+        state.readings = rows.filter(r => r.ts >= cutoff);
+        const last = rows[rows.length - 1], prevR = rows[rows.length - 2];
+        state.current = {
+          reading: last, previous: prevR || null,
+          delta: prevR ? last.mg_dl - prevR.mg_dl : null,
+          age_seconds: Math.floor(Date.now() / 1000 - last.ts),
+        };
+        state.health = { demo_mode: false, source: 'github', stale: (Date.now() / 1000 - last.ts) > 900, last_error: null };
       }
       $('errorBanner').classList.remove('show');
     } catch (e) {
-      $('errorText').textContent = `Can't reach the dashboard API (${e.message}). Is the server running?`;
-      $('errorBanner').classList.add('show');
+      // No data yet (first run) or unreachable: fall back to clearly-labeled demo data.
+      loadDemo();
+      if (!API) { $('errorBanner').classList.remove('show'); }
+      else { $('errorText').textContent = `Can't reach the dashboard API (${e.message}). Is the server running?`; $('errorBanner').classList.add('show'); }
     }
     render();
   }
@@ -279,7 +304,10 @@
     $('age').textContent = ago(c.age_seconds);
     $('trendDesc').textContent = r.trend_desc ? `· ${r.trend_desc}` : '';
     $('pulse').classList.toggle('off', stale);
-    $('subtitle').textContent = `Last reading ${fmtDateTime(r.ts)} · ${state.health && state.health.demo_mode ? 'sample data' : 'live from Dexcom Share'}`;
+    const src = (state.health && state.health.demo_mode) ? 'sample data'
+      : (state.health && state.health.source === 'github') ? 'via GitHub Actions (public data)'
+      : 'live from Dexcom Share';
+    $('subtitle').textContent = `Last reading ${fmtDateTime(r.ts)} · ${src}`;
     if (stale) { $('staleText').innerHTML = `<b>No new readings for ${ago(c.age_seconds)}.</b> Sensor warm-up, phone out of range, or Share login issue.`; }
     const err = state.health && state.health.last_error && state.health.consecutive_failures > 1;
     if (err) { $('staleText').innerHTML = `<b>Dexcom polling is failing</b> (${state.health.consecutive_failures}×): ${state.health.last_error}`; }

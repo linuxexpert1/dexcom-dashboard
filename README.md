@@ -61,6 +61,25 @@ curl -s localhost:8080/api/current
 python -m pytest -q
 ```
 
+## Option B: poll from GitHub Actions (no server)
+
+A scheduled workflow (`.github/workflows/poll.yml`) logs into Dexcom Share every ~5 minutes using repo **Actions Secrets** (`DEXCOM_USERNAME`, `DEXCOM_PASSWORD`, `DEXCOM_REGION`) and publishes `readings.json` to the repo's `data` branch. The GitHub Pages dashboard reads that file, so no always-on server is needed.
+
+Set the secrets once:
+
+```bash
+gh secret set DEXCOM_USERNAME --body 'you@example.com'
+gh secret set DEXCOM_PASSWORD                 # prompts, not stored in shell history
+gh secret set DEXCOM_REGION   --body 'us'
+gh workflow run "Poll Dexcom"                 # kick off the first run now
+```
+
+Trade-offs to know:
+
+- **Public data.** On a free GitHub plan, Pages is public, so the published readings (timestamps + glucose values, no name) are readable by anyone with the URL. For a private feed, run the server (Option A) on a home box or an OCI free-tier VM instead.
+- **Best-effort timing.** GitHub often runs scheduled workflows several minutes late and may skip runs under load, so this is not a real-time feed. The dashboard shows a "stale" banner whenever the newest reading is old.
+- Credentials live only in encrypted Actions Secrets — never in the repo or the published data.
+
 ## Run as a service (Linux, systemd)
 
 ```bash

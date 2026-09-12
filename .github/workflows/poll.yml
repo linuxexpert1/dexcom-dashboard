@@ -1,0 +1,58 @@
+name: Poll Dexcom
+
+# Polls Dexcom Share and publishes readings to the `data` branch, which the
+# dashboard on GitHub Pages reads. The `data` branch holds a single, always-
+# amended commit (no history bloat). Credentials come from repo Actions Secrets.
+#
+# NOTE: scheduled workflows are best-effort -- GitHub often runs them several
+# minutes late and may skip runs under load, so this is not a real-time feed.
+# The dashboard shows a "stale" warning whenever the newest reading is old.
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: poll-dexcom
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (for the poller script)
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pydexcom
+        run: pip install --quiet pydexcom
+
+      - name: Load existing readings from the data branch
+        run: |
+          mkdir -p out
+          curl -sfL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/data/readings.json" \
+            -o out/readings.json || echo '{"readings":[]}' > out/readings.json
+
+      - name: Poll Dexcom and merge
+        env:
+          DEXCOM_USERNAME: ${{ secrets.DEXCOM_USERNAME }}
+          DEXCOM_PASSWORD: ${{ secrets.DEXCOM_PASSWORD }}
+          DEXCOM_REGION: ${{ secrets.DEXCOM_REGION }}
+        run: python scripts/gh_poll.py out/readings.json
+
+      - name: Publish to the data branch
+        run: |
+          cd out
+          git init -q -b data
+          git config user.name "dexcom-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add readings.json
+          git commit -q -m "Update readings $(date -u +%FT%TZ) [skip ci]"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" data
