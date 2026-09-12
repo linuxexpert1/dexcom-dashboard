@@ -1,0 +1,107 @@
+---
+# Deploy the Dexcom dashboard as a systemd service on a RHEL/OEL/Ubuntu host.
+#   ansible-playbook -i "myhost," deploy/ansible/playbook.yml \
+#     -e dexcom_username='you@example.com' -e dexcom_password='...' -e api_token='...'
+- name: Deploy Dexcom dashboard
+  hosts: all
+  become: true
+  vars:
+    app_dir: /opt/dexcom-dashboard
+    app_user: dexcom
+    repo_url: https://github.com/linuxexpert1/dexcom-dashboard.git
+    repo_version: main
+    dexcom_username: ""
+    dexcom_account_id: ""
+    dexcom_password: ""
+    dexcom_region: us
+    api_token: ""
+    demo_mode: "0"
+    listen_port: 8080
+
+  tasks:
+    - name: Install Python and git
+      ansible.builtin.package:
+        name: "{{ ['python3', 'git'] + (['python3-venv'] if ansible_facts.os_family == 'Debian' else []) }}"
+        state: present
+
+    - name: Create service user
+      ansible.builtin.user:
+        name: "{{ app_user }}"
+        system: true
+        home: "{{ app_dir }}"
+        create_home: false
+        shell: /sbin/nologin
+
+    - name: Check out the repository
+      ansible.builtin.git:
+        repo: "{{ repo_url }}"
+        dest: "{{ app_dir }}"
+        version: "{{ repo_version }}"
+        force: true
+      notify: Restart dexcom-dashboard
+
+    - name: Install Python dependencies into a venv
+      ansible.builtin.pip:
+        requirements: "{{ app_dir }}/requirements.txt"
+        virtualenv: "{{ app_dir }}/.venv"
+        virtualenv_command: "python3 -m venv"
+      notify: Restart dexcom-dashboard
+
+    - name: Write .env
+      ansible.builtin.copy:
+        dest: "{{ app_dir }}/.env"
+        owner: "{{ app_user }}"
+        mode: "0600"
+        content: |
+          DEXCOM_USERNAME={{ dexcom_username }}
+          DEXCOM_ACCOUNT_ID={{ dexcom_account_id }}
+          DEXCOM_PASSWORD={{ dexcom_password }}
+          DEXCOM_REGION={{ dexcom_region }}
+          DEMO_MODE={{ demo_mode }}
+          API_TOKEN={{ api_token }}
+          DB_PATH={{ app_dir }}/data/glucose.db
+          HOST=0.0.0.0
+          PORT={{ listen_port }}
+      no_log: true
+      notify: Restart dexcom-dashboard
+
+    - name: Ensure ownership and data dir
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        recurse: "{{ item == app_dir }}"
+      loop:
+        - "{{ app_dir }}"
+        - "{{ app_dir }}/data"
+
+    - name: Install systemd unit
+      ansible.builtin.copy:
+        src: ../dexcom-dashboard.service
+        dest: /etc/systemd/system/dexcom-dashboard.service
+        mode: "0644"
+      notify: Restart dexcom-dashboard
+
+    - name: Open firewall port (firewalld hosts only)
+      ansible.posix.firewalld:
+        port: "{{ listen_port }}/tcp"
+        permanent: true
+        immediate: true
+        state: enabled
+      when: ansible_facts.os_family == 'RedHat'
+      ignore_errors: true
+
+    - name: Enable and start service
+      ansible.builtin.systemd:
+        name: dexcom-dashboard
+        enabled: true
+        state: started
+        daemon_reload: true
+
+  handlers:
+    - name: Restart dexcom-dashboard
+      ansible.builtin.systemd:
+        name: dexcom-dashboard
+        state: restarted
+        daemon_reload: true

@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0f1419">
+<title>Glucose Dashboard</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%2322c55e'/%3E%3Cpath d='M8 18l5-6 4 8 3-4 4 2' stroke='%23fff' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #0f1419; --surface: #171d25; --surface-2: #1f2731; --border: #2a3441;
+    --ink: #e8edf2; --ink-2: #a3aeba; --ink-3: #6b7785;
+    --good: #22c55e; --warn: #f59e0b; --serious: #ef4444; --critical: #b91c1c;
+    --accent: #60a5fa; --band: rgba(34,197,94,0.10);
+    --radius: 14px; --shadow: 0 1px 2px rgba(0,0,0,.35);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f4f6f8; --surface: #ffffff; --surface-2: #eef1f4; --border: #dde3ea;
+      --ink: #111827; --ink-2: #4b5563; --ink-3: #8a94a3;
+      --good: #16a34a; --warn: #d97706; --serious: #dc2626; --critical: #991b1b;
+      --accent: #2563eb; --band: rgba(22,163,74,0.10); --shadow: 0 1px 2px rgba(0,0,0,.08);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body { padding: 16px; padding-bottom: max(24px, env(safe-area-inset-bottom)); max-width: 1100px; margin: 0 auto; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  h1 { font-size: 18px; font-weight: 600; margin: 0; letter-spacing: .2px; }
+  .sub { color: var(--ink-3); font-size: 12px; margin-top: 2px; }
+  .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 2px; }
+  .seg button { background: transparent; border: 0; color: var(--ink-2); padding: 6px 11px; border-radius: 8px; font-size: 13px; cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+  .btn { background: var(--surface-2); border: 1px solid var(--border); color: var(--ink-2); border-radius: 10px; padding: 7px 11px; font-size: 13px; cursor: pointer; }
+  .btn[aria-pressed="true"] { color: var(--ink); border-color: var(--accent); }
+
+  .banner { display: none; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px; font-size: 13px; margin-bottom: 14px; border: 1px solid; }
+  .banner.show { display: flex; }
+  .banner.demo { background: rgba(96,165,250,.10); border-color: rgba(96,165,250,.35); color: var(--ink-2); }
+  .banner.stale { background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.45); color: var(--ink); }
+  .banner.error { background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.45); color: var(--ink); }
+
+  .grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+  @media (min-width: 760px) { .grid { grid-template-columns: 320px 1fr; } .span2 { grid-column: 1 / -1; } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); min-width: 0; }
+  .card h2 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; color: var(--ink-3); margin: 0 0 10px; }
+
+  /* hero */
+  .hero { display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; min-height: 250px; position: relative; }
+  .hero .value { font-size: 88px; font-weight: 700; line-height: 1; letter-spacing: -2px; font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 10px; }
+  .hero .arrow { font-size: 56px; font-weight: 500; line-height: 1; }
+  .hero .unit { color: var(--ink-3); font-size: 14px; margin-top: 6px; }
+  .hero .status { margin-top: 12px; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; padding: 5px 12px; border-radius: 999px; background: var(--surface-2); }
+  .hero .status .dot { width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+  .hero .meta { color: var(--ink-2); font-size: 13px; margin-top: 12px; display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+  .hero .meta b { color: var(--ink); font-weight: 600; }
+  .s-in_range { color: var(--good); } .s-high { color: var(--warn); } .s-low { color: var(--warn); }
+  .s-urgent_high { color: var(--serious); } .s-urgent_low { color: var(--serious); }
+  .pulse { position: absolute; top: 12px; right: 14px; width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 0 rgba(34,197,94,.6); animation: pulse 2.4s infinite; }
+  .pulse.off { background: var(--ink-3); animation: none; box-shadow: none; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,.55);} 70% { box-shadow: 0 0 0 10px rgba(34,197,94,0);} 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0);} }
+
+  /* chart */
+  .chart-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+  .chart-wrap { position: relative; width: 100%; }
+  svg.chart { width: 100%; height: 300px; display: block; touch-action: pan-y; }
+  .tip { position: absolute; pointer-events: none; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12px; color: var(--ink); box-shadow: var(--shadow); white-space: nowrap; display: none; transform: translate(-50%, -110%); }
+  .tip b { font-size: 14px; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--ink-3); margin-top: 6px; flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: -1px; margin-right: 5px; }
+
+  /* stats */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+  .tile { background: var(--surface-2); border-radius: 10px; padding: 12px; }
+  .tile .k { font-size: 11px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .5px; }
+  .tile .v { font-size: 24px; font-weight: 600; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .tile .v small { font-size: 12px; color: var(--ink-3); font-weight: 500; margin-left: 3px; }
+  .tir { margin-top: 14px; }
+  .tir .bar { display: flex; height: 18px; border-radius: 6px; overflow: hidden; gap: 2px; background: var(--surface-2); }
+  .tir .bar div { min-width: 0; transition: flex .4s; }
+  .tir .lbl { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-2); margin-top: 6px; flex-wrap: wrap; gap: 8px; }
+  .tir .lbl span i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+  th { color: var(--ink-3); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+  details summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
+  footer { color: var(--ink-3); font-size: 11px; text-align: center; margin-top: 18px; line-height: 1.6; }
+  footer a { color: var(--ink-2); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1 id="title">Glucose Dashboard</h1>
+    <div class="sub" id="subtitle">Connecting…</div>
+  </div>
+  <div class="controls">
+    <div class="seg" id="unitSeg" role="group" aria-label="Units">
+      <button data-unit="mgdl" aria-pressed="true">mg/dL</button>
+      <button data-unit="mmol" aria-pressed="false">mmol/L</button>
+    </div>
+    <button class="btn" id="notifyBtn" aria-pressed="false" title="Browser notification on low/high or stale data">🔔 Alerts</button>
+  </div>
+</header>
+
+<div class="banner demo" id="demoBanner">
+  <span>🧪</span><span><b>Demo mode</b> — showing generated sample data, not a real sensor. Run the server with Dexcom Share credentials to see live readings.</span>
+</div>
+<div class="banner stale" id="staleBanner"><span>⚠️</span><span id="staleText"></span></div>
+<div class="banner error" id="errorBanner"><span>⛔</span><span id="errorText"></span></div>
+
+<div class="grid">
+  <section class="card hero" aria-live="polite">
+    <div class="pulse off" id="pulse"></div>
+    <div class="value"><span id="value">—</span><span class="arrow" id="arrow"></span></div>
+    <div class="unit" id="unitLabel">mg/dL</div>
+    <div class="status" id="status"><span class="dot"></span><span id="statusText">no data</span></div>
+    <div class="meta">
+      <span>Δ <b id="delta">—</b></span>
+      <span>updated <b id="age">—</b></span>
+      <span id="trendDesc"></span>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="chart-head">
+      <h2 style="margin:0">Glucose history</h2>
+      <div class="seg" id="rangeSeg" role="group" aria-label="Time range">
+        <button data-hours="3">3h</button>
+        <button data-hours="6">6h</button>
+        <button data-hours="12">12h</button>
+        <button data-hours="24" aria-pressed="true">24h</button>
+        <button data-hours="168">7d</button>
+      </div>
+    </div>
+    <div class="chart-wrap">
+      <svg class="chart" id="chart" role="img" aria-label="Glucose over time"></svg>
+      <div class="tip" id="tip"></div>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--band);border:1px solid var(--good)"></i>Target range <span id="legendRange"></span></span>
+      <span><i style="background:var(--good)"></i>In range</span>
+      <span><i style="background:var(--warn)"></i>Low / High</span>
+      <span><i style="background:var(--serious)"></i>Urgent</span>
+    </div>
+  </section>
+
+  <section class="card span2">
+    <h2>Summary for selected range</h2>
+    <div class="tiles">
+      <div class="tile"><div class="k">Time in range</div><div class="v" id="tirV">—</div></div>
+      <div class="tile"><div class="k">Average</div><div class="v" id="avgV">—</div></div>
+      <div class="tile"><div class="k">GMI (est. A1c)</div><div class="v" id="gmiV">—</div></div>
+      <div class="tile"><div class="k">Variability (CV)</div><div class="v" id="cvV">—</div></div>
+      <div class="tile"><div class="k">Lowest</div><div class="v" id="minV">—</div></div>
+      <div class="tile"><div class="k">Highest</div><div class="v" id="maxV">—</div></div>
+      <div class="tile"><div class="k">Readings</div><div class="v" id="countV">—</div></div>
+    </div>
+    <div class="tir">
+      <div class="bar" id="tirBar"></div>
+      <div class="lbl" id="tirLbl"></div>
+    </div>
+    <details style="margin-top:14px">
+      <summary>Show readings as a table</summary>
+      <div style="max-height:320px;overflow:auto;margin-top:8px">
+        <table><thead><tr><th>Time</th><th>Glucose</th><th>Trend</th><th>Status</th></tr></thead><tbody id="tableBody"></tbody></table>
+      </div>
+    </details>
+  </section>
+</div>
+
+<footer>
+  GMI is an estimate from CGM averages, not a lab A1c. This dashboard is a personal tool and not a medical device — always follow the Dexcom app and your care team for treatment decisions.<br>
+  <a href="https://github.com/linuxexpert1/dexcom-dashboard">Source on GitHub</a>
+</footer>
+
+<script>
+(() => {
+  // ---------- config & state ----------
+  const params = new URLSearchParams(location.search);
+  const DEMO = params.get('demo') === '1' || /github\.io$/.test(location.hostname) || location.protocol === 'file:';
+  const TOKEN = params.get('token') || localStorage.getItem('apiToken') || '';
+  if (params.get('token')) { try { localStorage.setItem('apiToken', params.get('token')); } catch {} }
+  const API = (params.get('api') || '').replace(/\/$/, '');   // optional: point at a remote backend
+  const state = {
+    hours: 24, unit: localStorage.getItem('unit') || 'mgdl', readings: [], current: null, health: null,
+    thresholds: { target_low: 70, target_high: 180, urgent_low: 55, urgent_high: 250 },
+    notify: localStorage.getItem('notify') === '1', lastNotified: { key: null, ts: 0 },
+  };
+  const $ = id => document.getElementById(id);
+
+  // ---------- units & formatting ----------
+  const toUnit = v => state.unit === 'mmol' ? (v / 18).toFixed(1) : String(v);
+  const unitName = () => state.unit === 'mmol' ? 'mmol/L' : 'mg/dL';
+  const fmtTime = ts => new Date(ts * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const fmtDateTime = ts => new Date(ts * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const ago = s => s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)} min ago` : `${(s / 3600).toFixed(1)} h ago`;
+  const statusLabel = { in_range: 'In range', low: 'Low', high: 'High', urgent_low: 'URGENT LOW', urgent_high: 'Urgent high' };
+  const statusIcon = { in_range: '✓', low: '▽', high: '△', urgent_low: '‼', urgent_high: '‼' };
+  const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const colorFor = s => s === 'in_range' ? cssVar('--good') : (s === 'low' || s === 'high') ? cssVar('--warn') : cssVar('--serious');
+  const classify = v => { const t = state.thresholds; return v < t.urgent_low ? 'urgent_low' : v < t.target_low ? 'low' : v <= t.target_high ? 'in_range' : v <= t.urgent_high ? 'high' : 'urgent_high'; };
+  const TRENDS = { 0: ['', ''], 1: ['↑↑', 'rising quickly'], 2: ['↑', 'rising'], 3: ['↗', 'rising slightly'], 4: ['→', 'steady'], 5: ['↘', 'falling slightly'], 6: ['↓', 'falling'], 7: ['↓↓', 'falling quickly'], 8: ['?', 'unable to determine'], 9: ['-', 'unavailable'] };
+
+  // ---------- demo data (mirrors app/poller.py) ----------
+  function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  function demoReadings(hours) {
+    const rnd = mulberry32(42); const gauss = () => { let u = 0, v = 0; while (!u) u = rnd(); while (!v) v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+    const end = Math.floor(Date.now() / 1000 / 300) * 300; const n = Math.round(hours * 12); const rows = []; let prev = null;
+    for (let i = n; i >= 0; i--) {
+      const ts = end - 300 * i; const d = new Date(ts * 1000); const lh = d.getHours() + d.getMinutes() / 60;
+      const base = 120 + 12 * Math.sin((lh - 6) / 24 * 2 * Math.PI); let meals = 0;
+      for (const [mh, amp] of [[7.5, 55], [12.5, 60], [18.5, 70]]) { const dt = lh - mh; if (dt >= 0 && dt <= 3) meals += amp * Math.exp(-((dt - 1) ** 2) / 0.6); }
+      const day = 1 + 0.15 * Math.sin(Math.floor(ts / 86400) * 1.7);
+      const v = Math.max(45, Math.min(320, Math.round(base + meals * day + gauss() * 6)));
+      const slope = prev === null ? 0 : v - prev;
+      const trend = slope > 15 ? 1 : slope > 8 ? 2 : slope > 3 ? 3 : slope < -15 ? 7 : slope < -8 ? 6 : slope < -3 ? 5 : 4;
+      rows.push({ ts, mg_dl: v, trend, trend_arrow: TRENDS[trend][0], trend_desc: TRENDS[trend][1], status: classify(v) }); prev = v;
+    }
+    return rows;
+  }
+
+  // ---------- data loading ----------
+  async function api(path) {
+    const url = `${API}${path}${path.includes('?') ? '&' : '?'}_=${Date.now()}`;
+    const r = await fetch(url, { headers: TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {} });
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText} for ${path}`);
+    return r.json();
+  }
+  let demoCache = null;
+  async function load() {
+    try {
+      if (DEMO) {
+        demoCache = demoCache || demoReadings(24 * 7);
+        const cutoff = Date.now() / 1000 - state.hours * 3600;
+        state.readings = demoCache.filter(r => r.ts >= cutoff);
+        const last = demoCache[demoCache.length - 1], prevR = demoCache[demoCache.length - 2];
+        state.current = { reading: last, previous: prevR, delta: last.mg_dl - prevR.mg_dl, age_seconds: Math.floor(Date.now() / 1000 - last.ts) };
+        state.health = { demo_mode: true, stale: false, last_error: null };
+      } else {
+        const [cur, rd, health] = await Promise.all([api('/api/current'), api(`/api/readings?hours=${state.hours}`), api('/api/health')]);
+        state.current = cur; state.readings = rd.readings; state.health = health;
+        if (rd.thresholds) state.thresholds = rd.thresholds;
+      }
+      $('errorBanner').classList.remove('show');
+    } catch (e) {
+      $('errorText').textContent = `Can't reach the dashboard API (${e.message}). Is the server running?`;
+      $('errorBanner').classList.add('show');
+    }
+    render();
+  }
+
+  // ---------- rendering ----------
+  function render() {
+    const t = state.thresholds;
+    $('legendRange').textContent = `(${toUnit(t.target_low)}–${toUnit(t.target_high)})`;
+    $('unitLabel').textContent = unitName();
+    $('demoBanner').classList.toggle('show', !!(state.health && state.health.demo_mode));
+    renderHero(); renderChart(); renderStats(); renderTable(); maybeNotify();
+  }
+
+  function renderHero() {
+    const c = state.current, r = c && c.reading;
+    const hero = document.querySelector('.hero');
+    if (!r) { $('value').textContent = '—'; $('arrow').textContent = ''; $('statusText').textContent = 'no data yet'; $('subtitle').textContent = 'Waiting for first reading'; return; }
+    const st = r.status || classify(r.mg_dl);
+    $('value').textContent = toUnit(r.mg_dl);
+    $('value').className = 's-' + st;
+    $('arrow').textContent = r.trend_arrow || '';
+    $('arrow').className = 'arrow s-' + st;
+    $('status').className = 'status s-' + st;
+    $('statusText').textContent = `${statusIcon[st]} ${statusLabel[st]}`;
+    const d = c.delta; $('delta').textContent = d == null ? '—' : (d > 0 ? '+' : '') + (state.unit === 'mmol' ? (d / 18).toFixed(1) : d);
+    const stale = c.age_seconds > 15 * 60;
+    $('age').textContent = ago(c.age_seconds);
+    $('trendDesc').textContent = r.trend_desc ? `· ${r.trend_desc}` : '';
+    $('pulse').classList.toggle('off', stale);
+    $('subtitle').textContent = `Last reading ${fmtDateTime(r.ts)} · ${state.health && state.health.demo_mode ? 'sample data' : 'live from Dexcom Share'}`;
+    if (stale) { $('staleText').innerHTML = `<b>No new readings for ${ago(c.age_seconds)}.</b> Sensor warm-up, phone out of range, or Share login issue.`; }
+    const err = state.health && state.health.last_error && state.health.consecutive_failures > 1;
+    if (err) { $('staleText').innerHTML = `<b>Dexcom polling is failing</b> (${state.health.consecutive_failures}×): ${state.health.last_error}`; }
+    $('staleBanner').classList.toggle('show', stale || !!err);
+    document.title = `${toUnit(r.mg_dl)} ${r.trend_arrow || ''} · Glucose`;
+  }
+
+  function renderChart() {
+    const svg = $('chart'); const rows = state.readings; const t = state.thresholds;
+    const W = svg.clientWidth || 600, H = 300, P = { l: 40, r: 12, t: 12, b: 28 };
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    if (!rows.length) { svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" fill="${cssVar('--ink-3')}" text-anchor="middle" font-size="13">No readings in this range</text>`; return; }
+    const now = Date.now() / 1000, x0 = now - state.hours * 3600;
+    const yMax = Math.max(250, ...rows.map(r => r.mg_dl)) + 10, yMin = 40;
+    const X = ts => P.l + (ts - x0) / (now - x0) * (W - P.l - P.r);
+    const Y = v => P.t + (1 - (v - yMin) / (yMax - yMin)) * (H - P.t - P.b);
+    const ink3 = cssVar('--ink-3'), border = cssVar('--border');
+    let s = '';
+    // target band
+    s += `<rect x="${P.l}" y="${Y(t.target_high)}" width="${W - P.l - P.r}" height="${Y(t.target_low) - Y(t.target_high)}" fill="var(--band)"/>`;
+    s += `<line x1="${P.l}" x2="${W - P.r}" y1="${Y(t.target_high)}" y2="${Y(t.target_high)}" stroke="var(--good)" stroke-dasharray="3 4" stroke-opacity=".6"/>`;
+    s += `<line x1="${P.l}" x2="${W - P.r}" y1="${Y(t.target_low)}" y2="${Y(t.target_low)}" stroke="var(--good)" stroke-dasharray="3 4" stroke-opacity=".6"/>`;
+    // y gridlines
+    for (const v of [t.urgent_low, t.target_low, t.target_high, t.urgent_high, 300].filter(v => v < yMax)) {
+      s += `<line x1="${P.l}" x2="${W - P.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="${border}" stroke-opacity=".7"/>`;
+      s += `<text x="${P.l - 6}" y="${Y(v) + 4}" text-anchor="end" font-size="11" fill="${ink3}">${toUnit(v)}</text>`;
+    }
+    // x ticks
+    const span = now - x0; const plotW = W - P.l - P.r;
+    const steps = [900, 1800, 3600, 7200, 3 * 3600, 4 * 3600, 6 * 3600, 12 * 3600, 86400];
+    const step = steps.find(s => plotW / (span / s) >= 56) || 86400 * 2;
+    const localOffset = new Date().getTimezoneOffset() * 60;
+    for (let ts = Math.ceil((x0 - localOffset) / step) * step + localOffset; ts <= now; ts += step) {
+      const lbl = step >= 86400 ? new Date(ts * 1000).toLocaleDateString([], { weekday: 'short' }) : fmtTime(ts);
+      s += `<line x1="${X(ts)}" x2="${X(ts)}" y1="${P.t}" y2="${H - P.b}" stroke="${border}" stroke-opacity=".5"/>`;
+      s += `<text x="${X(ts)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="${ink3}">${lbl}</text>`;
+    }
+    // line segments, broken on gaps > 15 min, colored by status
+    const gapBreak = 15 * 60;
+    for (let i = 1; i < rows.length; i++) {
+      const a = rows[i - 1], b = rows[i];
+      if (b.ts - a.ts > gapBreak) continue;
+      const col = colorFor(b.status || classify(b.mg_dl));
+      s += `<line x1="${X(a.ts)}" y1="${Y(a.mg_dl)}" x2="${X(b.ts)}" y2="${Y(b.mg_dl)}" stroke="${col}" stroke-width="2" stroke-linecap="round"/>`;
+    }
+    // dots when sparse
+    if (rows.length <= 80) for (const r of rows) s += `<circle cx="${X(r.ts)}" cy="${Y(r.mg_dl)}" r="3" fill="${colorFor(r.status || classify(r.mg_dl))}" stroke="var(--surface)" stroke-width="1.5"/>`;
+    // latest marker
+    const last = rows[rows.length - 1];
+    s += `<circle cx="${X(last.ts)}" cy="${Y(last.mg_dl)}" r="5.5" fill="${colorFor(last.status || classify(last.mg_dl))}" stroke="var(--surface)" stroke-width="2"/>`;
+    s += `<g id="xhair" style="display:none"><line id="xhLine" y1="${P.t}" y2="${H - P.b}" stroke="${ink3}" stroke-dasharray="2 3"/><circle id="xhDot" r="5" fill="none" stroke="${cssVar('--ink')}" stroke-width="2"/></g>`;
+    s += `<rect id="hit" x="${P.l}" y="${P.t}" width="${W - P.l - P.r}" height="${H - P.t - P.b}" fill="transparent"/>`;
+    svg.innerHTML = s;
+    // hover / touch crosshair
+    const tip = $('tip'), hit = svg.querySelector('#hit');
+    const onMove = ev => {
+      const pt = ev.touches ? ev.touches[0] : ev; const rect = svg.getBoundingClientRect();
+      const px = (pt.clientX - rect.left) * (W / rect.width); const ts = x0 + (px - P.l) / (W - P.l - P.r) * (now - x0);
+      let best = rows[0]; for (const r of rows) if (Math.abs(r.ts - ts) < Math.abs(best.ts - ts)) best = r;
+      const xh = svg.querySelector('#xhair'); xh.style.display = '';
+      svg.querySelector('#xhLine').setAttribute('x1', X(best.ts)); svg.querySelector('#xhLine').setAttribute('x2', X(best.ts));
+      svg.querySelector('#xhDot').setAttribute('cx', X(best.ts)); svg.querySelector('#xhDot').setAttribute('cy', Y(best.mg_dl));
+      tip.style.display = 'block'; tip.style.left = `${X(best.ts) / W * rect.width}px`; tip.style.top = `${Y(best.mg_dl) / H * rect.height}px`;
+      tip.innerHTML = `<b>${toUnit(best.mg_dl)}</b> ${unitName()} ${best.trend_arrow || ''}<br><span style="color:var(--ink-3)">${fmtDateTime(best.ts)}</span>`;
+    };
+    const onLeave = () => { tip.style.display = 'none'; svg.querySelector('#xhair').style.display = 'none'; };
+    hit.addEventListener('mousemove', onMove); hit.addEventListener('touchmove', onMove, { passive: true }); hit.addEventListener('touchstart', onMove, { passive: true });
+    hit.addEventListener('mouseleave', onLeave); hit.addEventListener('touchend', onLeave);
+  }
+
+  function renderStats() {
+    const rows = state.readings, t = state.thresholds, n = rows.length;
+    const vals = rows.map(r => r.mg_dl);
+    const pct = f => n ? (100 * vals.filter(f).length / n) : 0;
+    const p = { vlow: pct(v => v < t.urgent_low), low: pct(v => v >= t.urgent_low && v < t.target_low), tir: pct(v => v >= t.target_low && v <= t.target_high), high: pct(v => v > t.target_high && v <= t.urgent_high), vhigh: pct(v => v > t.urgent_high) };
+    const mean = n ? vals.reduce((a, b) => a + b, 0) / n : null;
+    const sd = n > 1 ? Math.sqrt(vals.reduce((a, v) => a + (v - mean) ** 2, 0) / n) : 0;
+    const set = (id, html) => { $(id).innerHTML = html; };
+    set('tirV', n ? `${p.tir.toFixed(0)}<small>%</small>` : '—');
+    set('avgV', n ? `${toUnit(Math.round(mean))}<small>${unitName()}</small>` : '—');
+    set('gmiV', n ? `${(3.31 + 0.02392 * mean).toFixed(1)}<small>%</small>` : '—');
+    set('cvV', n && mean ? `${(100 * sd / mean).toFixed(0)}<small>%</small>` : '—');
+    set('minV', n ? toUnit(Math.min(...vals)) : '—');
+    set('maxV', n ? toUnit(Math.max(...vals)) : '—');
+    set('countV', n ? `${n}<small>/ ${Math.round(state.hours * 12)}</small>` : '—');
+    const segs = [['vlow', 'var(--serious)', 'Very low'], ['low', 'var(--warn)', 'Low'], ['tir', 'var(--good)', 'In range'], ['high', 'var(--warn)', 'High'], ['vhigh', 'var(--serious)', 'Very high']];
+    $('tirBar').innerHTML = segs.map(([k, c]) => `<div style="flex:${p[k].toFixed(2)};background:${c}" title="${p[k].toFixed(1)}%"></div>`).join('');
+    $('tirLbl').innerHTML = segs.map(([k, c, l]) => `<span><i style="background:${c}"></i>${l} ${p[k].toFixed(0)}%</span>`).join('');
+  }
+
+  function renderTable() {
+    const rows = [...state.readings].reverse().slice(0, 300);
+    $('tableBody').innerHTML = rows.map(r => { const st = r.status || classify(r.mg_dl); return `<tr><td>${fmtDateTime(r.ts)}</td><td>${toUnit(r.mg_dl)}</td><td>${r.trend_arrow || ''} ${r.trend_desc || ''}</td><td class="s-${st}">${statusLabel[st]}</td></tr>`; }).join('');
+  }
+
+  // ---------- notifications ----------
+  function maybeNotify() {
+    if (!state.notify || !('Notification' in window) || Notification.permission !== 'granted') return;
+    const c = state.current; if (!c || !c.reading) return;
+    const st = c.reading.status || classify(c.reading.mg_dl);
+    const stale = c.age_seconds > 20 * 60;
+    let key = null, title = '', body = '';
+    if (st === 'urgent_low' || st === 'low') { key = st + ':' + c.reading.ts; title = `${statusLabel[st]}: ${toUnit(c.reading.mg_dl)} ${unitName()} ${c.reading.trend_arrow || ''}`; body = c.reading.trend_desc || ''; }
+    else if (st === 'urgent_high') { key = st + ':' + c.reading.ts; title = `Urgent high: ${toUnit(c.reading.mg_dl)} ${unitName()} ${c.reading.trend_arrow || ''}`; body = c.reading.trend_desc || ''; }
+    else if (stale) { key = 'stale:' + c.reading.ts; title = 'No CGM data'; body = `No readings for ${ago(c.age_seconds)}`; }
+    if (!key || key === state.lastNotified.key) return;
+    if (Date.now() - state.lastNotified.ts < 10 * 60 * 1000 && key.split(':')[0] === (state.lastNotified.key || '').split(':')[0]) return; // rate-limit same alert type
+    state.lastNotified = { key, ts: Date.now() };
+    try { new Notification(title, { body, tag: 'glucose', renotify: true }); } catch {}
+  }
+  $('notifyBtn').addEventListener('click', async () => {
+    if (!('Notification' in window)) { alert('This browser does not support notifications.'); return; }
+    if (!state.notify) { const perm = await Notification.requestPermission(); if (perm !== 'granted') return; }
+    state.notify = !state.notify; localStorage.setItem('notify', state.notify ? '1' : '0'); $('notifyBtn').setAttribute('aria-pressed', String(state.notify));
+  });
+  $('notifyBtn').setAttribute('aria-pressed', String(state.notify));
+
+  // ---------- controls ----------
+  $('rangeSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; state.hours = +b.dataset.hours; [...$('rangeSeg').children].forEach(x => x.setAttribute('aria-pressed', String(x === b))); load(); });
+  $('unitSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; state.unit = b.dataset.unit; localStorage.setItem('unit', state.unit); [...$('unitSeg').children].forEach(x => x.setAttribute('aria-pressed', String(x === b))); render(); });
+  [...$('unitSeg').children].forEach(x => x.setAttribute('aria-pressed', String(x.dataset.unit === state.unit)));
+  window.addEventListener('resize', () => renderChart());
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => render());
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
+
+  load();
+  setInterval(load, 60 * 1000);          // refresh data every minute
+  setInterval(() => { if (state.current && state.current.reading) { state.current.age_seconds += 15; $('age').textContent = ago(state.current.age_seconds); } }, 15000);
+})();
+</script>
+</body>
+</html>

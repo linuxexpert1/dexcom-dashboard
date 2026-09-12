@@ -1,0 +1,19 @@
+[Unit]
+Description=Dexcom glucose dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dexcom
+WorkingDirectory=/opt/dexcom-dashboard
+EnvironmentFile=/opt/dexcom-dashboard/.env
+ExecStart=/opt/dexcom-dashboard/.venv/bin/python -m app.main
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
