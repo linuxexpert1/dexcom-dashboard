@@ -6,7 +6,7 @@
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0f1419">
 <meta name="robots" content="noindex,nofollow">
-<title>Glucose Dashboard</title>
+<title>Rahim Glucose Dashboard</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%2322c55e'/%3E%3Cpath d='M8 18l5-6 4 8 3-4 4 2' stroke='%23fff' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <style>
   :root {
@@ -90,8 +90,12 @@
   th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
   th { color: var(--ink-3); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
   details summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
-  footer { color: var(--ink-3); font-size: 11px; text-align: center; margin-top: 18px; line-height: 1.6; }
+  footer { text-align: center; margin-top: 22px; }
   footer a { color: var(--ink-2); }
+  footer .dedication { color: var(--ink-2); font-size: 13px; line-height: 1.7; padding: 14px 0; border-top: 1px solid var(--border); margin-bottom: 12px; }
+  footer .dedication b { color: var(--ink); font-weight: 600; }
+  footer .dedication .rahim { color: var(--good); font-weight: 700; font-size: 16px; letter-spacing: .2px; }
+  footer .disclaimer { color: var(--ink-3); font-size: 11px; line-height: 1.6; }
 
   /* login */
   .lock-screen { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 50; }
@@ -112,7 +116,7 @@
 <div class="lock-screen" id="lockScreen" hidden>
   <form class="lock-card" id="lockForm" autocomplete="on">
     <div class="glyph">🔒</div>
-    <h1>Glucose Dashboard</h1>
+    <h1>Rahim Glucose Dashboard</h1>
     <p>Enter the family password to view.</p>
     <label for="luser">Username</label>
     <input id="luser" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" value="bahal-family">
@@ -126,7 +130,7 @@
 
 <header>
   <div>
-    <h1 id="title">Glucose Dashboard</h1>
+    <h1 id="title">Rahim Glucose Dashboard</h1>
     <div class="sub" id="subtitle">Connecting…</div>
   </div>
   <div class="controls">
@@ -206,8 +210,14 @@
 </div>
 
 <footer>
-  GMI is an estimate from CGM averages, not a lab A1c. This dashboard is a personal tool and not a medical device — always follow the Dexcom app and your care team for treatment decisions.<br>
-  <a href="https://github.com/linuxexpert1/dexcom-dashboard">Source on GitHub</a>
+  <div class="dedication">
+    Developed &amp; designed by <b>Abdihakim Hersi</b> · <a href="mailto:LinuxExpert1@gmail.com">LinuxExpert1@gmail.com</a><br>
+    Dedicated with love to his son <span class="rahim">Rahim Hersi</span> 💙
+  </div>
+  <div class="disclaimer">
+    GMI is an estimate from CGM averages, not a lab A1c. This dashboard is a personal tool and not a medical device — always follow the Dexcom app and your care team for treatment decisions.<br>
+    <a href="https://github.com/linuxexpert1/dexcom-dashboard">Source on GitHub</a>
+  </div>
 </footer>
 
 <script>
@@ -364,7 +374,7 @@
     const err = state.health && state.health.last_error && state.health.consecutive_failures > 1;
     if (err) { $('staleText').innerHTML = `<b>Dexcom polling is failing</b> (${state.health.consecutive_failures}×): ${state.health.last_error}`; }
     $('staleBanner').classList.toggle('show', stale || !!err);
-    document.title = `${toUnit(r.mg_dl)} ${r.trend_arrow || ''} · Glucose`;
+    document.title = `${toUnit(r.mg_dl)} ${r.trend_arrow || ''} · Rahim`;
   }
 
   function renderChart() {
