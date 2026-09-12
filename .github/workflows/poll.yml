@@ -94,9 +94,13 @@ jobs:
           [ "$ok" -gt 0 ]
 
       - name: Re-arm the next run
-        # `always()` so a failed poll window still hands off to the next run
-        # instead of silently ending the chain until the hourly safety net.
-        if: always()
+        # Hand off to the next run even if this poll window failed, so a
+        # transient Dexcom outage can't silently end the chain -- but NOT on
+        # cancellation. `always()` would include `cancelled`, which would make
+        # the chain restart itself every time you hit Cancel and leave no way
+        # to stop it short of disabling the workflow. `success() || failure()`
+        # is the idiom for "always except cancelled".
+        if: success() || failure()
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run poll.yml --repo "${GITHUB_REPOSITORY}" --ref main
