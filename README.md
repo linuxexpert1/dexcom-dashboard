@@ -61,24 +61,28 @@ curl -s localhost:8080/api/current
 python -m pytest -q
 ```
 
-## Option B: poll from GitHub Actions (no server)
+## Option B: poll from GitHub Actions (no server, encrypted)
 
-A scheduled workflow (`.github/workflows/poll.yml`) logs into Dexcom Share every ~5 minutes using repo **Actions Secrets** (`DEXCOM_USERNAME`, `DEXCOM_PASSWORD`, `DEXCOM_REGION`) and publishes `readings.json` to the repo's `data` branch. The GitHub Pages dashboard reads that file, so no always-on server is needed.
+A scheduled workflow (`.github/workflows/poll.yml`) logs into Dexcom Share every ~5 minutes using repo **Actions Secrets** and publishes an **encrypted** file, `readings.enc.json`, to the repo's `data` branch. The readings are encrypted on the runner with AES-256-GCM (key derived from `DATA_PASSPHRASE` via PBKDF2-HMAC-SHA256, 200k iterations). The GitHub Pages dashboard shows a login screen; the password you enter is the key that decrypts the data **in your browser** (WebCrypto). So even though the file sits on a public URL, it's ciphertext — unreadable without the passphrase — and the passphrase never travels over the network.
 
 Set the secrets once:
 
 ```bash
-gh secret set DEXCOM_USERNAME --body 'you@example.com'
-gh secret set DEXCOM_PASSWORD                 # prompts, not stored in shell history
+gh secret set DEXCOM_USERNAME --body '+1XXXXXXXXXX'   # the sensor-phone (sharer) Dexcom login
+gh secret set DEXCOM_PASSWORD                          # prompts; not stored in shell history
 gh secret set DEXCOM_REGION   --body 'us'
-gh workflow run "Poll Dexcom"                 # kick off the first run now
+gh secret set DATA_PASSPHRASE                          # the family password used to log into the dashboard
+gh workflow run "Poll Dexcom"                          # kick off the first run now
 ```
+
+The dashboard login username is `bahal-family` (a label); the password is the `DATA_PASSPHRASE` you set above. To change the password, update the `DATA_PASSPHRASE` secret and re-run the workflow — the next published file is re-encrypted with the new key, and everyone re-enters the new password.
 
 Trade-offs to know:
 
-- **Public data.** On a free GitHub plan, Pages is public, so the published readings (timestamps + glucose values, no name) are readable by anyone with the URL. For a private feed, run the server (Option A) on a home box or an OCI free-tier VM instead.
+- **Encrypted, but strength = your passphrase.** The file is unreadable without the passphrase, so use a strong one. Anyone you give the password to can read the data; there's no per-person access or revocation short of rotating the passphrase.
 - **Best-effort timing.** GitHub often runs scheduled workflows several minutes late and may skip runs under load, so this is not a real-time feed. The dashboard shows a "stale" banner whenever the newest reading is old.
-- Credentials live only in encrypted Actions Secrets — never in the repo or the published data.
+- Dexcom credentials and the passphrase live only in encrypted Actions Secrets — never in the repo. Plaintext readings never leave the runner.
+- For server-enforced access instead of client-side decryption (real per-user logins, revocation), run the backend (Option A) on a home box or an OCI free-tier VM.
 
 ## Run as a service (Linux, systemd)
 

@@ -1,7 +1,7 @@
 name: Poll Dexcom
 
-# Polls Dexcom Share and publishes readings to the `data` branch, which the
-# dashboard on GitHub Pages reads. The `data` branch holds a single, always-
+# Polls Dexcom Share and publishes an ENCRYPTED readings file to the `data`
+# branch, which the dashboard on GitHub Pages decrypts in the browser. The `data` branch holds a single, always-
 # amended commit (no history bloat). Credentials come from repo Actions Secrets.
 #
 # WHY THIS IS A LOOP AND NOT A `*/5` CRON:
@@ -45,13 +45,13 @@ jobs:
           python-version: "3.12"
 
       - name: Install pydexcom
-        run: pip install --quiet pydexcom
+        run: pip install --quiet pydexcom cryptography
 
       - name: Load existing readings from the data branch
         run: |
           mkdir -p out
-          curl -sfL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/data/readings.json" \
-            -o out/readings.json || echo '{"readings":[]}' > out/readings.json
+          curl -sfL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/data/readings.enc.json" \
+            -o out/readings.enc.json || echo '{"readings":[]}' > out/readings.enc.json
           cd out
           git init -q -b data
           git config user.name "dexcom-bot"
@@ -64,6 +64,7 @@ jobs:
           DEXCOM_USERNAME: ${{ secrets.DEXCOM_USERNAME }}
           DEXCOM_PASSWORD: ${{ secrets.DEXCOM_PASSWORD }}
           DEXCOM_REGION: ${{ secrets.DEXCOM_REGION }}
+          DATA_PASSPHRASE: ${{ secrets.DATA_PASSPHRASE }}
         run: |
           ok=0
           fail=0
@@ -71,10 +72,10 @@ jobs:
             echo "::group::Poll $i/$ITERATIONS at $(date -u +%FT%TZ)"
             # A single bad poll (transient Dexcom hiccup) must not kill the whole
             # run -- that would stall the dashboard until the next re-arm.
-            if python scripts/gh_poll.py out/readings.json; then
+            if python scripts/gh_poll.py out/readings.enc.json; then
               ok=$((ok + 1))
               cd out
-              git add readings.json
+              git add readings.enc.json
               # gh_poll.py always rewrites `generated_at`, so there is always a diff.
               git commit -q -m "Update readings $(date -u +%FT%TZ) [skip ci]"
               git push -f -q origin data

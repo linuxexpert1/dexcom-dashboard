@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0f1419">
+<meta name="robots" content="noindex,nofollow">
 <title>Glucose Dashboard</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%2322c55e'/%3E%3Cpath d='M8 18l5-6 4 8 3-4 4 2' stroke='%23fff' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <style>
@@ -25,6 +26,7 @@
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html, body { margin: 0; background: var(--bg); color: var(--ink); }
   body { padding: 16px; padding-bottom: max(24px, env(safe-area-inset-bottom)); max-width: 1100px; margin: 0 auto; }
   header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
@@ -90,9 +92,38 @@
   details summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
   footer { color: var(--ink-3); font-size: 11px; text-align: center; margin-top: 18px; line-height: 1.6; }
   footer a { color: var(--ink-2); }
+
+  /* login */
+  .lock-screen { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 50; }
+  .lock-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 28px 24px; width: 100%; max-width: 360px; text-align: center; }
+  .lock-card .glyph { font-size: 40px; line-height: 1; }
+  .lock-card h1 { font-size: 19px; margin: 12px 0 4px; }
+  .lock-card p { color: var(--ink-3); font-size: 13px; margin: 0 0 18px; }
+  .lock-card label { display: block; text-align: left; font-size: 12px; color: var(--ink-2); margin: 10px 0 4px; }
+  .lock-card input { width: 100%; box-sizing: border-box; background: var(--surface-2); border: 1px solid var(--border); color: var(--ink); border-radius: 10px; padding: 11px 12px; font-size: 15px; }
+  .lock-card input:focus { outline: none; border-color: var(--accent); }
+  .lock-card button { width: 100%; margin-top: 18px; background: var(--good); color: #04160b; border: 0; border-radius: 10px; padding: 12px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  .lock-card button:disabled { opacity: .6; cursor: default; }
+  .lock-err { color: var(--serious); font-size: 13px; min-height: 18px; margin-top: 12px; }
+  .lock-note { color: var(--ink-3); font-size: 11px; margin-top: 16px; line-height: 1.5; }
 </style>
 </head>
 <body>
+<div class="lock-screen" id="lockScreen" hidden>
+  <form class="lock-card" id="lockForm" autocomplete="on">
+    <div class="glyph">🔒</div>
+    <h1>Glucose Dashboard</h1>
+    <p>Enter the family password to view.</p>
+    <label for="luser">Username</label>
+    <input id="luser" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" value="bahal-family">
+    <label for="lpass">Password</label>
+    <input id="lpass" name="password" type="password" autocomplete="current-password" required>
+    <button type="submit" id="lbtn">Unlock</button>
+    <div class="lock-err" id="lockErr"></div>
+    <div class="lock-note">Readings are encrypted; this password decrypts them in your browser. Nobody without it can read the data, even though the file is public.</div>
+  </form>
+</div>
+
 <header>
   <div>
     <h1 id="title">Glucose Dashboard</h1>
@@ -104,6 +135,7 @@
       <button data-unit="mmol" aria-pressed="false">mmol/L</button>
     </div>
     <button class="btn" id="notifyBtn" aria-pressed="false" title="Browser notification on low/high or stale data">🔔 Alerts</button>
+    <button class="btn" id="lockBtn" hidden title="Lock the dashboard">🔒 Lock</button>
   </div>
 </header>
 
@@ -186,10 +218,13 @@
   const TOKEN = params.get('token') || localStorage.getItem('apiToken') || '';
   if (params.get('token')) { try { localStorage.setItem('apiToken', params.get('token')); } catch {} }
   const API = (params.get('api') || '').replace(/\/$/, '');   // optional: point at a remote backend
-  // Static-data mode (GitHub Pages): readings.json is published to the repo's `data` branch by GitHub Actions.
+  // Static-data mode (GitHub Pages): an ENCRYPTED readings file is published to the repo's `data` branch by GitHub Actions.
   const DATA_URL = params.get('data') || (/github\.io$/.test(location.hostname)
-    ? 'https://raw.githubusercontent.com/linuxexpert1/dexcom-dashboard/data/readings.json'
-    : 'data/readings.json');
+    ? 'https://raw.githubusercontent.com/linuxexpert1/dexcom-dashboard/data/readings.enc.json'
+    : 'data/readings.enc.json');
+  const LOGIN_USER = 'bahal-family';   // label only; the password is the actual decryption key
+  let SESSION_PW = null;
+  try { SESSION_PW = sessionStorage.getItem('cgmpw'); } catch {}
   const state = {
     hours: 24, unit: localStorage.getItem('unit') || 'mgdl', readings: [], current: null, health: null,
     thresholds: { target_low: 70, target_high: 180, urgent_low: 55, urgent_high: 250 },
@@ -235,6 +270,18 @@
     if (!r.ok) throw new Error(`${r.status} ${r.statusText} for ${path}`);
     return r.json();
   }
+  // ---------- decryption (WebCrypto: PBKDF2-SHA256 -> AES-256-GCM), matches scripts/gh_poll.py ----------
+  async function decryptBlob(password, blob) {
+    const dec = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+    const salt = dec(blob.salt), iv = dec(blob.iv), ct = dec(blob.ct);
+    const baseKey = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']);
+    const key = await crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt, iterations: blob.iter || 200000, hash: 'SHA-256' },
+      baseKey, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
+    return JSON.parse(new TextDecoder().decode(plain));
+  }
+
   let demoCache = null;
   function loadDemo() {
     demoCache = demoCache || demoReadings(24 * 7);
@@ -253,9 +300,13 @@
       } else if (FORCE_DEMO) {
         loadDemo();
       } else {
+        if (!SESSION_PW) throw new Error('LOCKED');
         const res = await fetch(`${DATA_URL}${DATA_URL.includes('?') ? '&' : '?'}_=${Date.now()}`, { cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const j = await res.json();
+        const blob = await res.json();
+        let j;
+        try { j = await decryptBlob(SESSION_PW, blob); }
+        catch { throw new Error('BADPW'); }
         const rows = (j.readings || []).map(r => ({ ...r, status: classify(r.mg_dl) }));
         if (!rows.length) throw new Error('no readings yet');
         if (j.thresholds) state.thresholds = j.thresholds;
@@ -271,6 +322,7 @@
       }
       $('errorBanner').classList.remove('show');
     } catch (e) {
+      if (!API && (e.message === 'LOCKED' || e.message === 'BADPW')) { showLock(e.message === 'BADPW'); return; }
       // No data yet (first run) or unreachable: fall back to clearly-labeled demo data.
       loadDemo();
       if (!API) { $('errorBanner').classList.remove('show'); }
@@ -305,7 +357,7 @@
     $('trendDesc').textContent = r.trend_desc ? `· ${r.trend_desc}` : '';
     $('pulse').classList.toggle('off', stale);
     const src = (state.health && state.health.demo_mode) ? 'sample data'
-      : (state.health && state.health.source === 'github') ? 'via GitHub Actions (public data)'
+      : (state.health && state.health.source === 'github') ? 'via GitHub Actions (encrypted)'
       : 'live from Dexcom Share';
     $('subtitle').textContent = `Last reading ${fmtDateTime(r.ts)} · ${src}`;
     if (stale) { $('staleText').innerHTML = `<b>No new readings for ${ago(c.age_seconds)}.</b> Sensor warm-up, phone out of range, or Share login issue.`; }
@@ -433,9 +485,60 @@
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => render());
   document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
 
-  load();
-  setInterval(load, 60 * 1000);          // refresh data every minute
-  setInterval(() => { if (state.current && state.current.reading) { state.current.age_seconds += 15; $('age').textContent = ago(state.current.age_seconds); } }, 15000);
+  // ---------- login gate ----------
+  const NEEDS_LOGIN = !API && !FORCE_DEMO;   // static/GitHub Pages mode is password-gated
+  let loopsStarted = false;
+  function startLoops() {
+    if (loopsStarted) return; loopsStarted = true;
+    setInterval(load, 60 * 1000);          // refresh data every minute
+    setInterval(() => { if (state.current && state.current.reading) { state.current.age_seconds += 15; $('age').textContent = ago(state.current.age_seconds); } }, 15000);
+  }
+  function showLock(badPw) {
+    try { sessionStorage.removeItem('cgmpw'); } catch {}
+    SESSION_PW = null;
+    $('lockErr').textContent = badPw ? 'Incorrect username or password.' : '';
+    $('lockScreen').hidden = false;
+    $('lockBtn').hidden = true;
+    $('lpass').value = '';
+    setTimeout(() => { try { $('lpass').focus(); } catch {} }, 60);
+  }
+  function unlockUI() { $('lockScreen').hidden = true; $('lockBtn').hidden = false; }
+
+  $('lockForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const u = $('luser').value.trim(), p = $('lpass').value;
+    const btn = $('lbtn');
+    if (u !== LOGIN_USER) { $('lockErr').textContent = 'Incorrect username or password.'; return; }
+    btn.disabled = true; btn.textContent = 'Unlocking…'; $('lockErr').textContent = '';
+    try {
+      const res = await fetch(`${DATA_URL}${DATA_URL.includes('?') ? '&' : '?'}_=${Date.now()}`, { cache: 'no-store' });
+      if (!res.ok) throw new Error('fetch');
+      const blob = await res.json();
+      await decryptBlob(p, blob);          // throws on wrong password
+      SESSION_PW = p;
+      try { sessionStorage.setItem('cgmpw', p); } catch {}
+      unlockUI();
+      await load();
+      startLoops();
+    } catch (err) {
+      $('lockErr').textContent = (err && err.message === 'fetch')
+        ? 'Could not reach the data — check your connection and try again.'
+        : 'Incorrect username or password.';
+    } finally {
+      btn.disabled = false; btn.textContent = 'Unlock';
+    }
+  });
+  $('lockBtn').addEventListener('click', () => showLock(false));
+
+  (async function boot() {
+    if (!NEEDS_LOGIN) { await load(); startLoops(); return; }
+    if (SESSION_PW) {
+      await load();                        // showLock() runs inside load() if the stored password is wrong
+      if (SESSION_PW) { unlockUI(); startLoops(); }
+    } else {
+      showLock(false);
+    }
+  })();
 })();
 </script>
 </body>
