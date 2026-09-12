@@ -4,17 +4,26 @@ name: Poll Dexcom
 # dashboard on GitHub Pages reads. The `data` branch holds a single, always-
 # amended commit (no history bloat). Credentials come from repo Actions Secrets.
 #
-# NOTE: scheduled workflows are best-effort -- GitHub often runs them several
-# minutes late and may skip runs under load, so this is not a real-time feed.
-# The dashboard shows a "stale" warning whenever the newest reading is old.
+# WHY THIS IS A LOOP AND NOT A `*/5` CRON:
+# GitHub's scheduler treats short-interval schedules on free public runners as
+# best-effort. A `*/5` cron here never fired once in nearly two hours, and even
+# when such schedules do run they typically land every 15-60 min with drops.
+# So instead, ONE run polls every 5 minutes for ~55 minutes and then
+# re-dispatches itself, which gives a genuine 5-minute cadence. The hourly cron
+# below is only a safety net to restart the chain if a run ever dies without
+# re-arming. Public repos get unlimited free Actions minutes, so the long-lived
+# job costs nothing.
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    # Safety net only -- restarts the chain if it ever breaks. Hourly schedules
+    # are delivered far more reliably than `*/5` ones.
+    - cron: "0 * * * *"
   workflow_dispatch: {}
 
 permissions:
   contents: write
+  actions: write # needed to re-dispatch this workflow at the end of the run
 
 concurrency:
   group: poll-dexcom
@@ -23,6 +32,10 @@ concurrency:
 jobs:
   poll:
     runs-on: ubuntu-latest
+    timeout-minutes: 70
+    env:
+      ITERATIONS: 11 # 11 polls, 5 min apart => ~55 min per run
+      INTERVAL_SECONDS: 300
     steps:
       - name: Checkout (for the poller script)
         uses: actions/checkout@v4
@@ -39,20 +52,50 @@ jobs:
           mkdir -p out
           curl -sfL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/data/readings.json" \
             -o out/readings.json || echo '{"readings":[]}' > out/readings.json
-
-      - name: Poll Dexcom and merge
-        env:
-          DEXCOM_USERNAME: ${{ secrets.DEXCOM_USERNAME }}
-          DEXCOM_PASSWORD: ${{ secrets.DEXCOM_PASSWORD }}
-          DEXCOM_REGION: ${{ secrets.DEXCOM_REGION }}
-        run: python scripts/gh_poll.py out/readings.json
-
-      - name: Publish to the data branch
-        run: |
           cd out
           git init -q -b data
           git config user.name "dexcom-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add readings.json
-          git commit -q -m "Update readings $(date -u +%FT%TZ) [skip ci]"
-          git push -f "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" data
+          git remote add origin \
+            "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git"
+
+      - name: Poll every 5 minutes for ~55 minutes
+        env:
+          DEXCOM_USERNAME: ${{ secrets.DEXCOM_USERNAME }}
+          DEXCOM_PASSWORD: ${{ secrets.DEXCOM_PASSWORD }}
+          DEXCOM_REGION: ${{ secrets.DEXCOM_REGION }}
+        run: |
+          ok=0
+          fail=0
+          for i in $(seq 1 "$ITERATIONS"); do
+            echo "::group::Poll $i/$ITERATIONS at $(date -u +%FT%TZ)"
+            # A single bad poll (transient Dexcom hiccup) must not kill the whole
+            # run -- that would stall the dashboard until the next re-arm.
+            if python scripts/gh_poll.py out/readings.json; then
+              ok=$((ok + 1))
+              cd out
+              git add readings.json
+              # gh_poll.py always rewrites `generated_at`, so there is always a diff.
+              git commit -q -m "Update readings $(date -u +%FT%TZ) [skip ci]"
+              git push -f -q origin data
+              cd ..
+              echo "published"
+            else
+              fail=$((fail + 1))
+              echo "::warning::poll $i failed; continuing"
+            fi
+            echo "::endgroup::"
+            if [ "$i" -lt "$ITERATIONS" ]; then sleep "$INTERVAL_SECONDS"; fi
+          done
+          echo "Completed: $ok ok, $fail failed"
+          # Only fail the job if nothing at all got through, so the re-arm step
+          # still reports a healthy chain on partial success.
+          [ "$ok" -gt 0 ]
+
+      - name: Re-arm the next run
+        # `always()` so a failed poll window still hands off to the next run
+        # instead of silently ending the chain until the hourly safety net.
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run poll.yml --repo "${GITHUB_REPOSITORY}" --ref main
