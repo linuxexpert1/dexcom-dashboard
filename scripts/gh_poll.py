@@ -85,8 +85,23 @@ def main() -> int:
     else:
         kwargs["username"] = os.environ["DEXCOM_USERNAME"]
 
-    dex = Dexcom(**kwargs)
-    fetched = dex.get_glucose_readings(minutes=1440, max_count=288)
+    # Dexcom's auth endpoint intermittently 500s (worse under frequent logins),
+    # so retry a few times with backoff before giving up on this run.
+    import time
+    last_exc = None
+    fetched = None
+    for attempt in range(4):
+        try:
+            dex = Dexcom(**kwargs)
+            fetched = dex.get_glucose_readings(minutes=1440, max_count=288)
+            break
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            print(f"WARN: Dexcom attempt {attempt + 1} failed: {exc}", file=sys.stderr)
+            if attempt < 3:
+                time.sleep(8 * (attempt + 1))
+    if fetched is None:
+        raise last_exc
     for r in fetched:
         ts = r.datetime
         if ts.tzinfo is None:
