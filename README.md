@@ -118,6 +118,18 @@ The dashboard is a plain web page. Point the phone at `http://<server-ip>:8080` 
 - **Stale banner** — sensor warm-up, phone away from the sensor, or the Dexcom app is not uploading. Check the Follow app shows the same gap.
 - **Readings 5–10 minutes behind** — normal; Dexcom Share publishes with a short delay and the poller checks ~30 s after each expected reading.
 
-## License
+---
 
-MIT
+## Author
+
+### Abdihakim Hersi
+
+Developed & designed by **Abdihakim Hersi**.
+
+|          |                                                        |
+| -------- | ------------------------------------------------------ |
+| **Author** | **Abdihakim Hersi**                                  |
+| **Email**  | [linuxexpert1@gmail.com](mailto:linuxexpert1@gmail.com) |
+
+> [!NOTE]
+> 💙 **Dedicated with love to his son Rahim Hersi.**
