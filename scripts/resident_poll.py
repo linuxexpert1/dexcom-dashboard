@@ -112,6 +112,90 @@ def fetch(dex: Dexcom):
     return dex.get_glucose_readings(minutes=1440, max_count=288)
 
 
+# ---- alerting (email / carrier email-to-SMS) ----------------------------
+import smtplib
+import ssl
+from email.message import EmailMessage
+
+ALERT_STATE_FILE = REPO_DIR.parent / "alert_state.json"
+
+
+def _alert_cfg() -> dict:
+    return {
+        "high": int(os.environ.get("ALERT_HIGH", "255")),
+        "repeat": int(os.environ.get("ALERT_REPEAT_MINUTES", "30")) * 60,
+        "smtp_host": os.environ.get("SMTP_HOST", "smtp.gmail.com"),
+        "smtp_port": int(os.environ.get("SMTP_PORT", "587")),
+        "smtp_user": os.environ.get("SMTP_USER", ""),
+        "smtp_pass": os.environ.get("SMTP_PASS", ""),
+        "sender": os.environ.get("ALERT_FROM") or os.environ.get("SMTP_USER", ""),
+        "to": [x.strip() for x in os.environ.get("ALERT_TO", "").split(",") if x.strip()],
+    }
+
+
+def _load_alert_state() -> dict:
+    try:
+        return json.loads(ALERT_STATE_FILE.read_text())
+    except Exception:
+        return {"high_active": False, "last_sent": 0}
+
+
+def _save_alert_state(st: dict) -> None:
+    try:
+        ALERT_STATE_FILE.write_text(json.dumps(st))
+    except Exception as exc:  # noqa: BLE001
+        log(f"alert state save failed: {exc}")
+
+
+def send_email(cfg: dict, subject: str, body: str) -> bool:
+    if not (cfg["smtp_user"] and cfg["smtp_pass"] and cfg["to"]):
+        return False
+    msg = EmailMessage()
+    msg["From"] = cfg["sender"]
+    msg["To"] = ", ".join(cfg["to"])
+    msg["Subject"] = subject
+    msg.set_content(body)
+    ctx = ssl.create_default_context()
+    with smtplib.SMTP(cfg["smtp_host"], cfg["smtp_port"], timeout=30) as s:
+        s.starttls(context=ctx)
+        s.login(cfg["smtp_user"], cfg["smtp_pass"])
+        s.send_message(msg)
+    return True
+
+
+def maybe_alert(existing: dict) -> None:
+    """Fire on crossing ALERT_HIGH, remind every ALERT_REPEAT_MINUTES while high, all-clear on recovery."""
+    cfg = _alert_cfg()
+    if not cfg["to"] or not existing:
+        return  # alerts not configured, or no data yet
+    ts = max(existing)
+    r = existing[ts]
+    v = r["mg_dl"]
+    now = time.time()
+    st = _load_alert_state()
+    arrow = r.get("trend_arrow", "")
+    when = datetime.fromtimestamp(ts, timezone.utc).astimezone().strftime("%-I:%M %p %Z")
+    url = "https://linuxexpert1.github.io/dexcom-dashboard/"
+    if v >= cfg["high"]:
+        if not st.get("high_active"):
+            if send_email(cfg, f"Rahim HIGH {v} mg/dL",
+                          f"HIGH: Rahim {v} mg/dL {arrow} at {when} (>= {cfg['high']}). {url}"):
+                log(f"ALERT sent: high {v}")
+                st = {"high_active": True, "last_sent": now}
+        elif now - st.get("last_sent", 0) >= cfg["repeat"]:
+            if send_email(cfg, f"Rahim STILL HIGH {v} mg/dL",
+                          f"STILL HIGH: Rahim {v} mg/dL {arrow} at {when} (>= {cfg['high']}). {url}"):
+                log(f"ALERT repeat: high {v}")
+                st["last_sent"] = now
+    else:
+        if st.get("high_active"):
+            if send_email(cfg, f"Rahim back below {cfg['high']}",
+                          f"Back below {cfg['high']}: Rahim {v} mg/dL {arrow} at {when}. {url}"):
+                log(f"ALERT all-clear: {v}")
+            st = {"high_active": False, "last_sent": 0}
+    _save_alert_state(st)
+
+
 def main() -> int:
     load_env()
     if not os.environ.get("DATA_PASSPHRASE") or not os.environ.get("DEXCOM_PASSWORD"):
@@ -145,6 +229,10 @@ def main() -> int:
             newest = max(existing) if existing else None
             age = int(time.time() - newest) if newest else None
             log(f"published {n} readings; newest {age}s old")
+            try:
+                maybe_alert(existing)
+            except Exception as exc:  # noqa: BLE001 - alerting must never break the poll loop
+                log(f"alert check failed: {exc}")
         except Exception as exc:  # noqa: BLE001 - never let the loop die
             log(f"cycle error ({type(exc).__name__}: {exc}); will retry next interval")
             dex = None  # force a fresh login next cycle
