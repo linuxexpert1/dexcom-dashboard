@@ -204,6 +204,31 @@ def maybe_alert(existing: dict) -> None:
     _save_alert_state(st)
 
 
+def maybe_health_alert(last_ok: float, last_err: str) -> None:
+    """Text when no publish has succeeded for ALERT_STALE_MINUTES (default 30);
+    repeat every ALERT_STALE_REPEAT_MINUTES (default 120); all-clear on recovery."""
+    cfg = _alert_cfg()
+    if not cfg["to"]:
+        return
+    stale = int(os.environ.get("ALERT_STALE_MINUTES", "30")) * 60
+    repeat = int(os.environ.get("ALERT_STALE_REPEAT_MINUTES", "120")) * 60
+    now = time.time()
+    st = _load_alert_state()
+    down = now - last_ok >= stale
+    mins = int((now - last_ok) // 60)
+    if down and (not st.get("stale_active") or now - st.get("stale_sent", 0) >= repeat):
+        if send_email(cfg, "Rahim dashboard NOT updating",
+                      f"Dashboard has not updated for {mins} min. Last error: {last_err or 'unknown'}"):
+            log(f"ALERT sent: dashboard stale {mins} min")
+            st["stale_active"], st["stale_sent"] = True, now
+    elif not down and st.get("stale_active"):
+        if send_email(cfg, "Rahim dashboard updating again",
+                      "Dashboard publishes have recovered."):
+            log("ALERT all-clear: dashboard updating again")
+        st["stale_active"], st["stale_sent"] = False, 0
+    _save_alert_state(st)
+
+
 def main() -> int:
     load_env()
     if not os.environ.get("DATA_PASSPHRASE") or not os.environ.get("DEXCOM_PASSWORD"):
@@ -215,6 +240,7 @@ def main() -> int:
     log(f"resident poller starting; interval={interval}s; history={len(existing)}")
 
     dex = None
+    last_ok, last_err = time.time(), ""
     while True:
         try:
             if dex is None:
@@ -237,13 +263,19 @@ def main() -> int:
             newest = max(existing) if existing else None
             age = int(time.time() - newest) if newest else None
             log(f"published {n} readings; newest {age}s old")
+            last_ok, last_err = time.time(), ""
             try:
                 maybe_alert(existing)
             except Exception as exc:  # noqa: BLE001 - alerting must never break the poll loop
                 log(f"alert check failed: {exc}")
         except Exception as exc:  # noqa: BLE001 - never let the loop die
             log(f"cycle error ({type(exc).__name__}: {exc}); will retry next interval")
+            last_err = f"{type(exc).__name__}: {exc}"[:200]
             dex = None  # force a fresh login next cycle
+        try:
+            maybe_health_alert(last_ok, last_err)
+        except Exception as exc:  # noqa: BLE001
+            log(f"health alert check failed: {exc}")
         time.sleep(interval)
 
 
