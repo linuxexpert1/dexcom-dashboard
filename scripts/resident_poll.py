@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -101,6 +102,13 @@ def publish(existing: dict[int, dict]) -> int:
                "thresholds": THRESHOLDS, "readings": readings}
     blob = encrypt(os.environ["DATA_PASSPHRASE"], json.dumps(payload, separators=(",", ":")).encode())
     (DATA_DIR / "readings.enc.json").write_text(json.dumps(blob, separators=(",", ":")))
+    # Publish as a single fresh commit every time. Encrypted blobs never
+    # delta-compress, so keeping history made the local clone grow to GBs and
+    # every push had to re-upload all of it (the hourly Actions backup also
+    # rewrites `data` as an orphan commit, so the histories never matched).
+    shutil.rmtree(DATA_DIR / ".git", ignore_errors=True)
+    git("init", "-q", "-b", "data")
+    git("remote", "add", "origin", REPO_HTTPS)
     git("add", "readings.enc.json")
     git("-c", "user.name=dexcom-bot", "-c", "user.email=actions@users.noreply.github.com",
         "commit", "-q", "-m", f"Update readings {datetime.now(timezone.utc):%FT%TZ}")
